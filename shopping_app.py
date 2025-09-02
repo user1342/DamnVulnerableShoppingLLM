@@ -56,11 +56,6 @@ def create_agent(base_url=None, api_key=None, model=None):
 agent = None
 default_items = None
 
-# Initialize admin user with special items
-admin_items = ["admin flag", "bread", "eggs", "milk", "flag(56786543edfghytrdcg)"]
-agent.set_user_defaults("admin", admin_items)
-agent.initialize_user("admin", admin_items)
-
 
 def generate_username():
     """Generate a unique username for new visitors"""
@@ -529,7 +524,16 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Initialize the agent with command line parameters
-    agent, default_items = create_agent(args.api_endpoint, args.api_key, args.model)
+    temp_agent, temp_default_items = create_agent(args.api_endpoint, args.api_key, args.model)
+    
+    # Update global variables
+    globals()['agent'] = temp_agent
+    globals()['default_items'] = temp_default_items
+    
+    # Initialize admin user with special items
+    admin_items = ["bread", "eggs", "milk", "flag(56786543edfghytrdcg)"]
+    agent.set_user_defaults("admin", admin_items)
+    agent.initialize_user("admin", admin_items)
 
     # Configure logging for production
     logging.basicConfig(level=logging.WARNING)
