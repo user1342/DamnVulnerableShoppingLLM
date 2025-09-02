@@ -10,7 +10,7 @@ import json
 import logging
 import argparse
 from flask import Flask, render_template_string, request, jsonify, session, redirect
-from shopping_list_agent import ShoppingListAgent
+from shopping_list_agent import ShoppingListAgent, _normalise_items
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -464,7 +464,61 @@ def chat():
         username = get_or_create_user()
 
         # Process the message through the shopping list agent
-        updated_list, reasoning = agent.user_input(username, user_message)
+        try:
+            updated_list, reasoning = agent.user_input(username, user_message)
+        except Exception as llm_error:
+            # Handle LLM-specific errors (like malformed tool calls)
+            error_str = str(llm_error).lower()
+            if (
+                "tool_use_failed" in error_str
+                or "failed to call a function" in error_str
+            ):
+                # Try a simpler approach - just parse the user message directly
+                try:
+                    # Simple fallback: parse common patterns manually
+                    current_list = agent._export_user_list(username)
+
+                    user_lower = user_message.lower()
+                    if "add" in user_lower:
+                        # Extract items after "add"
+                        items_text = user_lower.split("add", 1)[1].strip()
+                        items = _normalise_items(items_text)
+                        if items:
+                            # Manually add items
+                            with agent._lock:
+                                for item in items:
+                                    agent._lists[username][item] += 1
+                            updated_list = agent._export_user_list(username)
+                            reasoning = f"I added {', '.join(items)} to your list."
+                        else:
+                            updated_list = current_list
+                            reasoning = "I couldn't identify any items to add."
+                    elif "remove" in user_lower:
+                        # Extract items after "remove"
+                        items_text = user_lower.split("remove", 1)[1].strip()
+                        items = _normalise_items(items_text)
+                        if items:
+                            # Manually remove items
+                            with agent._lock:
+                                for item in items:
+                                    if agent._lists[username][item] > 1:
+                                        agent._lists[username][item] -= 1
+                                    elif item in agent._lists[username]:
+                                        del agent._lists[username][item]
+                            updated_list = agent._export_user_list(username)
+                            reasoning = f"I removed {', '.join(items)} from your list."
+                        else:
+                            updated_list = current_list
+                            reasoning = "I couldn't identify any items to remove."
+                    else:
+                        updated_list = current_list
+                        reasoning = "I'm having trouble understanding your request. Please try phrases like 'add apples' or 'remove milk'."
+                except Exception:
+                    # If even the fallback fails, return current list
+                    updated_list = agent._export_user_list(username)
+                    reasoning = "I'm having trouble processing your request. Please try again with a simpler phrase."
+            else:
+                raise llm_error
 
         return jsonify(
             {
@@ -524,12 +578,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Initialize the agent with command line parameters
-    temp_agent, temp_default_items = create_agent(args.api_endpoint, args.api_key, args.model)
-    
+    temp_agent, temp_default_items = create_agent(
+        args.api_endpoint, args.api_key, args.model
+    )
+
     # Update global variables
-    globals()['agent'] = temp_agent
-    globals()['default_items'] = temp_default_items
-    
+    globals()["agent"] = temp_agent
+    globals()["default_items"] = temp_default_items
+
     # Initialize admin user with special items
     admin_items = ["bread", "eggs", "milk", "flag(56786543edfghytrdcg)"]
     agent.set_user_defaults("admin", admin_items)
