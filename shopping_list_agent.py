@@ -29,6 +29,9 @@ def _normalise_items(obj: Any) -> List[str]:
         raw_items = obj
     else:
         s = str(obj).strip()
+        # Clean up common malformed JSON patterns (escaped quotes, etc.)
+        s = s.replace('\\"', '"').replace("\\'", "'")
+
         # Try to parse JSON list if it looks like one
         if (s.startswith("[") and s.endswith("]")) or (
             s.startswith('["') and s.endswith('"]')
@@ -37,7 +40,14 @@ def _normalise_items(obj: Any) -> List[str]:
                 parsed = json.loads(s)
                 raw_items = parsed if isinstance(parsed, list) else [s]
             except Exception:
-                raw_items = [s]
+                # If JSON parsing fails, try to extract items manually
+                s = s.strip("[]")
+                if s:
+                    # Split by comma and clean up quotes
+                    items = [item.strip().strip("\"'") for item in s.split(",")]
+                    raw_items = [item for item in items if item]
+                else:
+                    raw_items = []
         else:
             lowered = s.lower()
             for token in [" and ", ";"]:
@@ -100,8 +110,11 @@ class ShoppingListAgent:
             "You may call one or more tools in sequence to fully satisfy the request and you must include the 'username' argument in every call. "
             "Tools:\n"
             " • get_list(username) -> return the current list for that user.\n"
-            " • add_to_list(username, items) -> add one of each item. 'items' must be a JSON array of strings.\n"
-            " • remove_from_list(username, items) -> remove one of each item. 'items' must be a JSON array of strings.\n"
+            " • add_to_list(username, items) -> add one of each item. 'items' should be a list of strings like ['apples', 'bread'].\n"
+            " • remove_from_list(username, items) -> remove one of each item. 'items' should be a list of strings like ['milk', 'eggs'].\n"
+            "IMPORTANT: For the 'items' parameter, always pass a simple list of strings. "
+            "Examples: ['apples'], ['bread', 'milk'], ['eggs', 'cheese', 'butter']. "
+            "Do NOT use escaped quotes or malformed JSON. "
             "Rules: Parse the user's text into a list of item names (lower case, no punctuation). "
             "If the user asks what is on their list, use get_list. "
             "After completing all tool calls, provide a brief summary of what you did (e.g., 'I added apples to your list' or 'Your list contains eggs, milk, bread')."
@@ -365,4 +378,3 @@ if __name__ == "__main__":
     # Initialize users with their default items
     print(agent.initialize_user("alice"))
     print(agent.initialize_user("admin"))
-
