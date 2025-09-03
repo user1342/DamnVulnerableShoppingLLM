@@ -466,11 +466,11 @@ def chat():
         # Process the message through the shopping list agent
         try:
             updated_list, reasoning = agent.user_input(username, user_message)
-            
+
             # Log the reasoning/summary like the CLI version does
             if reasoning:
                 print(f"Reasoning: {reasoning}")
-            
+
         except Exception as llm_error:
             # Handle LLM-specific errors (like malformed tool calls)
             error_str = str(llm_error).lower()
@@ -494,7 +494,11 @@ def chat():
                                 for item in items:
                                     agent._lists[username][item] += 1
                             updated_list = agent._export_user_list(username)
-                            reasoning = f"I added {', '.join(items)} to your list. Your list now contains: {', '.join(updated_list)}" if updated_list else f"I added {', '.join(items)} to your list."
+                            reasoning = (
+                                f"I added {', '.join(items)} to your list. Your list now contains: {', '.join(updated_list)}"
+                                if updated_list
+                                else f"I added {', '.join(items)} to your list."
+                            )
                         else:
                             updated_list = current_list
                             reasoning = "I couldn't identify any items to add."
@@ -511,7 +515,11 @@ def chat():
                                     elif item in agent._lists[username]:
                                         del agent._lists[username][item]
                             updated_list = agent._export_user_list(username)
-                            reasoning = f"I removed {', '.join(items)} from your list. Your list now contains: {', '.join(updated_list)}" if updated_list else f"I removed {', '.join(items)} from your list. Your list is now empty."
+                            reasoning = (
+                                f"I removed {', '.join(items)} from your list. Your list now contains: {', '.join(updated_list)}"
+                                if updated_list
+                                else f"I removed {', '.join(items)} from your list. Your list is now empty."
+                            )
                         else:
                             updated_list = current_list
                             reasoning = "I couldn't identify any items to remove."
@@ -537,6 +545,7 @@ def chat():
     except Exception as e:
         print(f"Error in chat endpoint: {e}")
         return jsonify({"success": False, "error": str(e)})
+
 
 @app.route("/reset")
 def reset_user():
