@@ -288,7 +288,12 @@ class ShoppingListAgent:
         @tool
         def get_list(username: str) -> str:
             """Return the current shopping list for a user as JSON."""
-            return json.dumps(agent._export_user_list(username))
+            current_list = agent._export_user_list(username)
+            return json.dumps({
+                "action": "retrieved",
+                "current_list": current_list,
+                "message": f"{username}'s current shopping list: {current_list if current_list else 'empty'}"
+            })
 
         @tool
         def add_to_list(username: str, items: Any) -> str:
@@ -297,19 +302,34 @@ class ShoppingListAgent:
             with agent._lock:
                 for it in clean_items:
                     agent._lists[username][it] += 1
-            return json.dumps(agent._export_user_list(username))
+            updated_list = agent._export_user_list(username)
+            return json.dumps({
+                "action": "added",
+                "items": clean_items,
+                "current_list": updated_list,
+                "message": f"Successfully added {', '.join(clean_items)} to {username}'s list. Current list: {updated_list}"
+            })
 
         @tool
         def remove_from_list(username: str, items: Any) -> str:
             """Remove one of each item from the user's list. 'items' can be a list, JSON-encoded list or a simple string."""
             clean_items = _normalise_items(items)
+            removed_items = []
             with agent._lock:
                 for it in clean_items:
                     if agent._lists[username][it] > 1:
                         agent._lists[username][it] -= 1
+                        removed_items.append(it)
                     elif it in agent._lists[username]:
                         del agent._lists[username][it]
-            return json.dumps(agent._export_user_list(username))
+                        removed_items.append(it)
+            updated_list = agent._export_user_list(username)
+            return json.dumps({
+                "action": "removed",
+                "items": removed_items,
+                "current_list": updated_list,
+                "message": f"Successfully removed {', '.join(removed_items)} from {username}'s list. Current list: {updated_list}"
+            })
 
         return [set_defaults, initialize_list, get_list, add_to_list, remove_from_list]
 
