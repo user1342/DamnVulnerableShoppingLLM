@@ -40,7 +40,7 @@ def create_agent(base_url=None, api_key=None, model=None):
         logger = logging.getLogger("ShoppingListAgent")
         logger.setLevel(logging.INFO)  # Enable detailed logging
 
-        agent = ShoppingListAgent(llm, logger=logger, max_tool_rounds=6)
+        agent = ShoppingListAgent(llm, logger=logger, max_tool_rounds=2)
 
         # Set some default items for new users
         default_items = ["milk", "bread", "eggs"]
