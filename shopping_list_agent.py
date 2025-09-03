@@ -112,11 +112,24 @@ class ShoppingListAgent:
             " • get_list(username) -> return the current list for that user.\n"
             " • add_to_list(username, items) -> add items to the list. 'items' should be a list of strings like ['apples', 'bread'].\n"
             " • remove_from_list(username, items) -> remove items from the list. 'items' should be a list of strings like ['milk', 'eggs'].\n"
-            "IMPORTANT: \n"
+            "CRITICAL RULES: \n"
+            "- NEVER repeat a tool call that already succeeded - check the tool response for success\n"
+            "- If a tool returns a successful response, do NOT call it again with the same parameters\n"
+            "- Only call tools once per operation - if add_to_list succeeds, move on\n"
             "- Each tool returns a JSON response with the current list state\n"
-            "- Do NOT repeat the same tool call if you get a successful response\n"
-            "- After completing the necessary tool calls, provide a helpful summary like 'I added ham to your list' or 'I removed eggs and added ham and butter to your list. Your list now contains: butter, car, eggs, ham'\n"
-            "- Be specific about what you did and what the final list contains"
+            "MANDATORY SUMMARY REQUIREMENTS:\n"
+            "- You MUST provide a detailed, specific summary of what you accomplished\n"
+            "- NEVER use generic phrases like 'Task completed' or 'Done'\n"
+            "- ALWAYS specify exactly what items were added, removed, or modified\n"
+            "- ALWAYS include the final state of the shopping list\n"
+            "- Use natural, conversational language\n"
+            "- Examples of GOOD summaries:\n"
+            "  * 'I added apples and milk to your list. Your shopping list now contains: apples, bread, milk'\n"
+            "  * 'I removed eggs and added butter as requested. Your list now contains: bread, butter, milk'\n"
+            "  * 'I removed butter and kept only cream as you asked, removing a jar and tk as well. Your list now contains: cream'\n"
+            "  * 'I added ham to your list and then removed ha as you requested. Your list now contains: ham'\n"
+            "- If no changes were made, explain specifically why (e.g., 'The items you wanted to remove were not found in your list')\n"
+            "- Your summary is the most important part - make it rich and informative!"
         )
 
     def set_user_defaults(self, username: str, default_items: List[str]) -> None:
@@ -171,6 +184,9 @@ class ShoppingListAgent:
 
         self.log.info(f"Request: {username} - {text}")
 
+        # Track successful tool calls to prevent duplicates
+        successful_calls = set()
+
         for round_idx in range(self.max_tool_rounds):
             ai = self.llm_with_tools.invoke(messages)
 
@@ -214,6 +230,14 @@ class ShoppingListAgent:
                 if "items" in targs:
                     targs["items"] = _normalise_items(targs["items"])
 
+                # Create a signature for this tool call to detect duplicates
+                call_signature = f"{tname}({sorted(targs.items())})"
+                
+                # Skip if we've already successfully executed this exact call
+                if call_signature in successful_calls:
+                    self.log.info(f"Skipping duplicate tool call: {call_signature}")
+                    continue
+
                 if "username" not in targs:
                     messages.append(
                         ToolMessage(
@@ -242,6 +266,16 @@ class ShoppingListAgent:
                     output = tool_fn.invoke(targs)
                     # Log the tool response for debugging
                     self.log.info(f"Tool response: {output}")
+                    
+                    # Check if the tool call was successful
+                    try:
+                        response_data = json.loads(output)
+                        if "error" not in response_data:
+                            # Mark this call as successful
+                            successful_calls.add(call_signature)
+                    except:
+                        pass  # If we can't parse the response, don't mark as successful
+                        
                 except Exception as e:
                     output = json.dumps({"error": str(e)})
 
@@ -251,6 +285,10 @@ class ShoppingListAgent:
                 any_executed = True
 
             if not any_executed:
+                break
+                
+            # If this was the final round, break to prevent infinite loops
+            if round_idx >= self.max_tool_rounds - 1:
                 break
 
         # Get one final response from the LLM for reasoning/summary
@@ -262,7 +300,7 @@ class ShoppingListAgent:
 
         result = self._export_user_list(username)
         self.log.info(f"Final list: {result}")
-        return result, final_reasoning or "Task completed."
+        return result, final_reasoning or "Please provide a summary of what was accomplished."
 
     # ---- Tool definitions ----
 
@@ -290,11 +328,13 @@ class ShoppingListAgent:
         def get_list(username: str) -> str:
             """Return the current shopping list for a user as JSON."""
             current_list = agent._export_user_list(username)
-            return json.dumps({
-                "action": "retrieved",
-                "current_list": current_list,
-                "message": f"{username}'s current shopping list: {current_list if current_list else 'empty'}"
-            })
+            return json.dumps(
+                {
+                    "action": "retrieved",
+                    "current_list": current_list,
+                    "message": f"{username}'s current shopping list: {current_list if current_list else 'empty'}",
+                }
+            )
 
         @tool
         def add_to_list(username: str, items: Any) -> str:
@@ -303,13 +343,16 @@ class ShoppingListAgent:
             with agent._lock:
                 for it in clean_items:
                     agent._lists[username][it] += 1
-            updated_list = agent._export_user_list(username)
-            return json.dumps({
-                "action": "added",
-                "items": clean_items,
-                "current_list": updated_list,
-                "message": f"Successfully added {', '.join(clean_items)} to {username}'s list. Current list: {updated_list}"
-            })
+                # Calculate updated list while still holding the lock
+                updated_list = sorted(list(agent._lists[username].keys()))
+            return json.dumps(
+                {
+                    "action": "added",
+                    "items": clean_items,
+                    "current_list": updated_list,
+                    "message": f"Successfully added {', '.join(clean_items)} to {username}'s list. Current list: {updated_list}",
+                }
+            )
 
         @tool
         def remove_from_list(username: str, items: Any) -> str:
@@ -324,13 +367,16 @@ class ShoppingListAgent:
                     elif it in agent._lists[username]:
                         del agent._lists[username][it]
                         removed_items.append(it)
-            updated_list = agent._export_user_list(username)
-            return json.dumps({
-                "action": "removed",
-                "items": removed_items,
-                "current_list": updated_list,
-                "message": f"Successfully removed {', '.join(removed_items)} from {username}'s list. Current list: {updated_list}"
-            })
+                # Calculate updated list while still holding the lock
+                updated_list = sorted(list(agent._lists[username].keys()))
+            return json.dumps(
+                {
+                    "action": "removed",
+                    "items": removed_items,
+                    "current_list": updated_list,
+                    "message": f"Successfully removed {', '.join(removed_items)} from {username}'s list. Current list: {updated_list}",
+                }
+            )
 
         return [set_defaults, initialize_list, get_list, add_to_list, remove_from_list]
 
