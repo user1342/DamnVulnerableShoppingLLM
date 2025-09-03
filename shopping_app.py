@@ -472,92 +472,69 @@ def chat():
 
         username = get_or_create_user()
 
-        # Capture logging output
-        import io
-        log_capture = io.StringIO()
-        
-        # Add a temporary handler to capture logs for this request
-        temp_handler = logging.StreamHandler(log_capture)
-        temp_handler.setFormatter(
-            logging.Formatter("%(message)s")
-        )
-        agent_logger = logging.getLogger("ShoppingListAgent")
-        agent_logger.addHandler(temp_handler)
-
+        # Process the message through the shopping list agent
         try:
-            # Process the message through the shopping list agent
-            try:
-                updated_list, reasoning = agent.user_input(username, user_message)
-                
-                # Get the captured log output
-                log_output = log_capture.getvalue()
-                
-                # Extract meaningful information from logs to enhance reasoning
-                enhanced_reasoning = enhance_reasoning_from_logs(log_output, reasoning, updated_list)
-                
-            except Exception as llm_error:
-                # Handle LLM-specific errors (like malformed tool calls)
-                error_str = str(llm_error).lower()
-                if (
-                    "tool_use_failed" in error_str
-                    or "failed to call a function" in error_str
-                ):
-                    # Try a simpler approach - just parse the user message directly
-                    try:
-                        # Simple fallback: parse common patterns manually
-                        current_list = agent._export_user_list(username)
+            updated_list, reasoning = agent.user_input(username, user_message)
+            
+        except Exception as llm_error:
+            # Handle LLM-specific errors (like malformed tool calls)
+            error_str = str(llm_error).lower()
+            if (
+                "tool_use_failed" in error_str
+                or "failed to call a function" in error_str
+            ):
+                # Try a simpler approach - just parse the user message directly
+                try:
+                    # Simple fallback: parse common patterns manually
+                    current_list = agent._export_user_list(username)
 
-                        user_lower = user_message.lower()
-                        if "add" in user_lower:
-                            # Extract items after "add"
-                            items_text = user_lower.split("add", 1)[1].strip()
-                            items = _normalise_items(items_text)
-                            if items:
-                                # Manually add items
-                                with agent._lock:
-                                    for item in items:
-                                        agent._lists[username][item] += 1
-                                updated_list = agent._export_user_list(username)
-                                enhanced_reasoning = f"I added {', '.join(items)} to your list. Your list now contains: {', '.join(updated_list)}" if updated_list else f"I added {', '.join(items)} to your list."
-                            else:
-                                updated_list = current_list
-                                enhanced_reasoning = "I couldn't identify any items to add."
-                        elif "remove" in user_lower:
-                            # Extract items after "remove"
-                            items_text = user_lower.split("remove", 1)[1].strip()
-                            items = _normalise_items(items_text)
-                            if items:
-                                # Manually remove items
-                                with agent._lock:
-                                    for item in items:
-                                        if agent._lists[username][item] > 1:
-                                            agent._lists[username][item] -= 1
-                                        elif item in agent._lists[username]:
-                                            del agent._lists[username][item]
-                                updated_list = agent._export_user_list(username)
-                                enhanced_reasoning = f"I removed {', '.join(items)} from your list. Your list now contains: {', '.join(updated_list)}" if updated_list else f"I removed {', '.join(items)} from your list. Your list is now empty."
-                            else:
-                                updated_list = current_list
-                                enhanced_reasoning = "I couldn't identify any items to remove."
+                    user_lower = user_message.lower()
+                    if "add" in user_lower:
+                        # Extract items after "add"
+                        items_text = user_lower.split("add", 1)[1].strip()
+                        items = _normalise_items(items_text)
+                        if items:
+                            # Manually add items
+                            with agent._lock:
+                                for item in items:
+                                    agent._lists[username][item] += 1
+                            updated_list = agent._export_user_list(username)
+                            reasoning = f"I added {', '.join(items)} to your list. Your list now contains: {', '.join(updated_list)}" if updated_list else f"I added {', '.join(items)} to your list."
                         else:
                             updated_list = current_list
-                            enhanced_reasoning = "I'm having trouble understanding your request. Please try phrases like 'add apples' or 'remove milk'."
-                    except Exception:
-                        # If even the fallback fails, return current list
-                        updated_list = agent._export_user_list(username)
-                        enhanced_reasoning = "I'm having trouble processing your request. Please try again with a simpler phrase."
-                else:
-                    raise llm_error
-        finally:
-            # Remove the temporary handler
-            agent_logger.removeHandler(temp_handler)
-            log_capture.close()
+                            reasoning = "I couldn't identify any items to add."
+                    elif "remove" in user_lower:
+                        # Extract items after "remove"
+                        items_text = user_lower.split("remove", 1)[1].strip()
+                        items = _normalise_items(items_text)
+                        if items:
+                            # Manually remove items
+                            with agent._lock:
+                                for item in items:
+                                    if agent._lists[username][item] > 1:
+                                        agent._lists[username][item] -= 1
+                                    elif item in agent._lists[username]:
+                                        del agent._lists[username][item]
+                            updated_list = agent._export_user_list(username)
+                            reasoning = f"I removed {', '.join(items)} from your list. Your list now contains: {', '.join(updated_list)}" if updated_list else f"I removed {', '.join(items)} from your list. Your list is now empty."
+                        else:
+                            updated_list = current_list
+                            reasoning = "I couldn't identify any items to remove."
+                    else:
+                        updated_list = current_list
+                        reasoning = "I'm having trouble understanding your request. Please try phrases like 'add apples' or 'remove milk'."
+                except Exception:
+                    # If even the fallback fails, return current list
+                    updated_list = agent._export_user_list(username)
+                    reasoning = "I'm having trouble processing your request. Please try again with a simpler phrase."
+            else:
+                raise llm_error
 
         return jsonify(
             {
                 "success": True,
                 "items": updated_list,
-                "reasoning": enhanced_reasoning,
+                "reasoning": reasoning,
                 "username": username,
             }
         )
@@ -565,50 +542,6 @@ def chat():
     except Exception as e:
         print(f"Error in chat endpoint: {e}")
         return jsonify({"success": False, "error": str(e)})
-
-
-def enhance_reasoning_from_logs(log_output, original_reasoning, updated_list):
-    """Extract meaningful information from logs to create better user-facing reasoning"""
-    if not log_output:
-        return original_reasoning or "Task completed."
-    
-    lines = log_output.strip().split('\n')
-    actions_taken = []
-    llm_reasoning = ""
-    
-    for line in lines:
-        line = line.strip()
-        if line.startswith("LLM actions:"):
-            # Extract what the LLM decided to do
-            actions = line.replace("LLM actions:", "").strip()
-            if actions:
-                actions_taken.append(actions)
-        elif line.startswith("LLM reasoning:"):
-            # Extract the LLM's final reasoning
-            llm_reasoning = line.replace("LLM reasoning:", "").strip()
-    
-    # Build enhanced reasoning
-    if llm_reasoning and llm_reasoning != "Task completed.":
-        # Use LLM's reasoning if it's meaningful
-        enhanced = llm_reasoning
-    elif actions_taken:
-        # Build reasoning from actions if LLM reasoning is generic
-        enhanced = f"I {', '.join(actions_taken)}."
-    else:
-        # Fallback to original reasoning
-        enhanced = original_reasoning or "Task completed."
-    
-    # Add current list state if it's not empty and not already mentioned
-    if updated_list and "your list" not in enhanced.lower():
-        if len(updated_list) <= 5:
-            enhanced += f" Your list now contains: {', '.join(updated_list)}."
-        else:
-            enhanced += f" Your list now has {len(updated_list)} items."
-    elif not updated_list and "empty" not in enhanced.lower():
-        enhanced += " Your list is now empty."
-    
-    return enhanced
-
 
 @app.route("/reset")
 def reset_user():
