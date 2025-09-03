@@ -39,15 +39,6 @@ def create_agent(base_url=None, api_key=None, model=None):
         # Create agent with full logging for web interface
         logger = logging.getLogger("ShoppingListAgent")
         logger.setLevel(logging.INFO)  # Enable detailed logging
-        
-        # Create a custom handler that we can capture output from
-        import io
-        log_capture = io.StringIO()
-        handler = logging.StreamHandler(log_capture)
-        handler.setFormatter(
-            logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s")
-        )
-        logger.addHandler(handler)
 
         agent = ShoppingListAgent(llm, logger=logger, max_tool_rounds=6)
 
@@ -475,6 +466,10 @@ def chat():
         # Process the message through the shopping list agent
         try:
             updated_list, reasoning = agent.user_input(username, user_message)
+            
+            # Log the reasoning/summary like the CLI version does
+            if reasoning:
+                print(f"Reasoning: {reasoning}")
             
         except Exception as llm_error:
             # Handle LLM-specific errors (like malformed tool calls)
