@@ -117,7 +117,9 @@ class ShoppingListAgent:
             "Do NOT use escaped quotes or malformed JSON. "
             "Rules: Parse the user's text into a list of item names (lower case, no punctuation). "
             "If the user asks what is on their list, use get_list. "
-            "After completing all tool calls, provide a brief summary of what you did (e.g., 'I added apples to your list' or 'Your list contains eggs, milk, bread')."
+            "IMPORTANT: Each tool call will return a JSON response indicating success and the current list state. "
+            "Once you receive a successful response from a tool, DO NOT call the same tool again with the same arguments. "
+            "After completing all necessary tool calls, provide a brief summary of what you did (e.g., 'I added apples to your list' or 'Your list contains eggs, milk, bread')."
         )
 
     def set_user_defaults(self, username: str, default_items: List[str]) -> None:
@@ -241,6 +243,8 @@ class ShoppingListAgent:
 
                 try:
                     output = tool_fn.invoke(targs)
+                    # Log the tool response for debugging
+                    self.log.info(f"Tool response: {output}")
                 except Exception as e:
                     output = json.dumps({"error": str(e)})
 
